@@ -51,44 +51,57 @@ impl JIT {
     /// Compile a string in the toy language into machine code.
     pub fn compile(&mut self, input: &str) -> Result<*const u8, String> {
         // First, parse the string, producing AST nodes.
-        let (name, params, the_return, stmts) =
-            parser::function(input).map_err(|e| e.to_string())?;
+        let expr = parser::expression(input)
+            .map_err(|e| e.to_string())?
+            .make_unique_names();
+        //.make_unique_names();
 
-        // Then, translate the AST nodes into Cranelift IR.
-        self.translate(params, the_return, stmts)?;
+        println!("{}", expr);
 
-        // Next, declare the function to jit. Functions must be declared
-        // before they can be called, or defined.
-        //
-        // TODO: This may be an area where the API should be streamlined; should
-        // we have a version of `declare_function` that automatically declares
-        // the function?
-        let id = self
-            .module
-            .declare_function(&name, Linkage::Export, &self.ctx.func.signature)
-            .map_err(|e| e.to_string())?;
+        println!("{}", C::from(expr).to_string());
 
-        // Define the function to jit. This finishes compilation, although
-        // there may be outstanding relocations to perform. Currently, jit
-        // cannot finish relocations until all functions to be called are
-        // defined. For this toy demo for now, we'll just finalize the
-        // function below.
-        self.module
-            .define_function(id, &mut self.ctx)
-            .map_err(|e| e.to_string())?;
+        /*
+        for function in expr {
+            println!("{}", function);
+        }*/
 
-        // Now that compilation is finished, we can clear out the context state.
-        self.module.clear_context(&mut self.ctx);
+        /*
+               // Then, translate the AST nodes into Cranelift IR.
+               self.translate(params, the_return, stmts)?;
 
-        // Finalize the functions which we just defined, which resolves any
-        // outstanding relocations (patching in addresses, now that they're
-        // available).
-        self.module.finalize_definitions().unwrap();
+               // Next, declare the function to jit. Functions must be declared
+               // before they can be called, or defined.
+               //
+               // TODO: This may be an area where the API should be streamlined; should
+               // we have a version of `declare_function` that automatically declares
+               // the function?
+               let id = self
+                   .module
+                   .declare_function(&name, Linkage::Export, &self.ctx.func.signature)
+                   .map_err(|e| e.to_string())?;
 
-        // We can now retrieve a pointer to the machine code.
-        let code = self.module.get_finalized_function(id);
+               // Define the function to jit. This finishes compilation, although
+               // there may be outstanding relocations to perform. Currently, jit
+               // cannot finish relocations until all functions to be called are
+               // defined. For this toy demo for now, we'll just finalize the
+               // function below.
+               self.module
+                   .define_function(id, &mut self.ctx)
+                   .map_err(|e| e.to_string())?;
 
+               // Now that compilation is finished, we can clear out the context state.
+               self.module.clear_context(&mut self.ctx);
+
+               // Finalize the functions which we just defined, which resolves any
+               // outstanding relocations (patching in addresses, now that they're
+               // available).
+               self.module.finalize_definitions().unwrap();
+
+               // We can now retrieve a pointer to the machine code.
+               let code = self.module.get_finalized_function(id);
         Ok(code)
+        */
+        todo!();
     }
 
     /// Create a zero-initialized data section.
@@ -195,55 +208,9 @@ impl<'a> FunctionTranslator<'a> {
     /// can then use these references in other instructions.
     fn translate_expr(&mut self, expr: Expr) -> Value {
         match expr {
-            Expr::Literal(literal) => {
-                let imm: i32 = literal.parse().unwrap();
-                self.builder.ins().iconst(self.int, i64::from(imm))
-            }
-
-            Expr::Add(lhs, rhs) => {
-                let lhs = self.translate_expr(*lhs);
-                let rhs = self.translate_expr(*rhs);
-                self.builder.ins().iadd(lhs, rhs)
-            }
-
-            Expr::Sub(lhs, rhs) => {
-                let lhs = self.translate_expr(*lhs);
-                let rhs = self.translate_expr(*rhs);
-                self.builder.ins().isub(lhs, rhs)
-            }
-
-            Expr::Mul(lhs, rhs) => {
-                let lhs = self.translate_expr(*lhs);
-                let rhs = self.translate_expr(*rhs);
-                self.builder.ins().imul(lhs, rhs)
-            }
-
-            Expr::Div(lhs, rhs) => {
-                let lhs = self.translate_expr(*lhs);
-                let rhs = self.translate_expr(*rhs);
-                self.builder.ins().udiv(lhs, rhs)
-            }
-
-            Expr::Eq(lhs, rhs) => self.translate_icmp(IntCC::Equal, *lhs, *rhs),
-            Expr::Ne(lhs, rhs) => self.translate_icmp(IntCC::NotEqual, *lhs, *rhs),
-            Expr::Lt(lhs, rhs) => self.translate_icmp(IntCC::SignedLessThan, *lhs, *rhs),
-            Expr::Le(lhs, rhs) => self.translate_icmp(IntCC::SignedLessThanOrEqual, *lhs, *rhs),
-            Expr::Gt(lhs, rhs) => self.translate_icmp(IntCC::SignedGreaterThan, *lhs, *rhs),
-            Expr::Ge(lhs, rhs) => self.translate_icmp(IntCC::SignedGreaterThanOrEqual, *lhs, *rhs),
-            Expr::Call(name, args) => self.translate_call(name, args),
-            Expr::GlobalDataAddr(name) => self.translate_global_data_addr(name),
-            Expr::Identifier(name) => {
-                // `use_var` is used to read the value of a variable.
-                let variable = self.variables.get(&name).expect("variable not defined");
-                self.builder.use_var(*variable)
-            }
-            Expr::Assign(name, expr) => self.translate_assign(name, *expr),
-            Expr::IfElse(condition, then_body, else_body) => {
-                self.translate_if_else(*condition, then_body, else_body)
-            }
-            Expr::WhileLoop(condition, loop_body) => {
-                self.translate_while_loop(*condition, loop_body)
-            }
+            Expr::Variable(name) => todo!(),
+            Expr::Abstraction(x, s) => todo!(),
+            Expr::Application(a, b) => todo!(),
         }
     }
 
@@ -428,23 +395,9 @@ fn declare_variables_in_stmt(
     expr: &Expr,
 ) {
     match *expr {
-        Expr::Assign(ref name, _) => {
-            declare_variable(int, builder, variables, index, name);
-        }
-        Expr::IfElse(ref _condition, ref then_body, ref else_body) => {
-            for stmt in then_body {
-                declare_variables_in_stmt(int, builder, variables, index, stmt);
-            }
-            for stmt in else_body {
-                declare_variables_in_stmt(int, builder, variables, index, stmt);
-            }
-        }
-        Expr::WhileLoop(ref _condition, ref loop_body) => {
-            for stmt in loop_body {
-                declare_variables_in_stmt(int, builder, variables, index, stmt);
-            }
-        }
-        _ => (),
+        Expr::Variable(_) => todo!(),
+        Expr::Abstraction(ref x, ref s) => todo!(),
+        Expr::Application(ref a, ref b) => todo!(),
     }
 }
 

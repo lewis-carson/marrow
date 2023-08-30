@@ -5,33 +5,12 @@ fn main() -> Result<(), String> {
     // Create the JIT instance, which manages all generated functions and data.
     let mut jit = jit::JIT::default();
     println!("the answer is: {}", run_foo(&mut jit)?);
-    println!(
-        "recursive_fib(10) = {}",
-        run_recursive_fib_code(&mut jit, 10)?
-    );
-    println!(
-        "iterative_fib(10) = {}",
-        run_iterative_fib_code(&mut jit, 10)?
-    );
-    run_hello(&mut jit)?;
+
     Ok(())
 }
 
 fn run_foo(jit: &mut jit::JIT) -> Result<isize, String> {
     unsafe { run_code(jit, FOO_CODE, (1, 0)) }
-}
-
-fn run_recursive_fib_code(jit: &mut jit::JIT, input: isize) -> Result<isize, String> {
-    unsafe { run_code(jit, RECURSIVE_FIB_CODE, input) }
-}
-
-fn run_iterative_fib_code(jit: &mut jit::JIT, input: isize) -> Result<isize, String> {
-    unsafe { run_code(jit, ITERATIVE_FIB_CODE, input) }
-}
-
-fn run_hello(jit: &mut jit::JIT) -> Result<isize, String> {
-    jit.create_data("hello_string", "hello world!\0".as_bytes().to_vec())?;
-    unsafe { run_code(jit, HELLO_CODE, ()) }
 }
 
 /// Executes the given code using the cranelift JIT compiler.
@@ -59,59 +38,44 @@ unsafe fn run_code<I, O>(jit: &mut jit::JIT, code: &str, input: I) -> Result<O, 
 // it was assigned when the function exits. Note that there are multiple
 // assignments, so the input is not in SSA form, but that's ok because
 // Cranelift handles all the details of translating into SSA form itself.
-const FOO_CODE: &str = r#"
-    fn foo(a, b) -> (c) {
-        c = if a {
-            if b {
-                30
-            } else {
-                40
-            }
-        } else {
-            50
-        }
-        c = c + 2
-    }
-"#;
+// const FOO_CODE: &str = r#"(#f. #x. f x) #a. #b. a"#;
+const FOO_CODE: &str = r#"(#x. x x) (#x. x x)"#;
 
-/// Another example: Recursive fibonacci.
-const RECURSIVE_FIB_CODE: &str = r#"
-    fn recursive_fib(n) -> (r) {
-        r = if n == 0 {
-                    0
-            } else {
-                if n == 1 {
-                    1
-                } else {
-                    recursive_fib(n - 1) + recursive_fib(n - 2)
+/*
+S(K K)(S K K)
+S((K x)(S((K y)x)))
+*/
+/*
+
+fn main(x) {
+    {
+        let a = fn f(f) {
+            fn f(x) {
+                {
+                    let a = {
+                        return f;
+                    };
+
+                    let b = {
+                        return x;
+                    };
+
+                    let r = a(b);
+                    return r;
                 }
             }
-    }
-"#;
+        };
 
-/// Another example: Iterative fibonacci.
-const ITERATIVE_FIB_CODE: &str = r#"
-    fn iterative_fib(n) -> (r) {
-        if n == 0 {
-            r = 0
-        } else {
-            n = n - 1
-            a = 0
-            r = 1
-            while n != 0 {
-                t = r
-                r = r + a
-                a = t
-                n = n - 1
+        let b = fn f(a) {
+            fn f(b) {
+                {
+                    return a;
+                }
             }
-        }
-    }
-"#;
+        };
 
-/// Let's say hello, by calling into libc. The puts function is resolved by
-/// dlsym to the libc function, and the string &hello_string is defined below.
-const HELLO_CODE: &str = r#"
-fn hello() -> (r) {
-    puts(&hello_string)
+        let r = a(b);
+        return r;
+    }
 }
-"#;
+ */
