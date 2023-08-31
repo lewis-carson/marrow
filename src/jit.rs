@@ -58,7 +58,7 @@ impl JIT {
 
         println!("{}", expr);
 
-        println!("{}", C::from(expr).to_string());
+        println!("{}", C::from(expr).convert_closures().to_string());
 
         /*
         for function in expr {

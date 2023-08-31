@@ -125,7 +125,7 @@ impl Expr {
 
 #[derive(Debug, Clone)]
 pub enum C {
-    Function(String, String, Box<C>),
+    Function(String, Vec<String>, Box<C>),
     Block(Vec<Box<C>>),
     Let(String, Box<C>),
     Call(String, String),
@@ -200,50 +200,54 @@ impl C {
 
                     *c += 1;
 
-                    C::Function(format!("f{c}"), name.clone(), Box::new(go(*s, c)))
+                    C::Function(format!("f{c}"), vec![name.clone()], Box::new(go(*s, c)))
                 }
             }
         }
 
-        C::Function(
-            "main".to_owned(),
-            "x".to_owned(),
-            Box::new(go(expr, &mut 0)),
-        )
+        C::Function("main".to_owned(), vec![], Box::new(go(expr, &mut 0)))
     }
 
-    fn add_orphan_returns(&mut self) -> Self {
+    pub fn convert_closures(&self) -> Self {
+        fn identify_free_under(c: &C) -> Vec<String> {
+            match c {
+                C::Function(_, _, body) => identify_free_under(body),
+                C::Block(body) => {
+                    let mut free = vec![];
+
+                    for c in body {
+                        free.append(&mut identify_free_under(c));
+                    }
+
+                    free
+                }
+                C::Let(_, value) => match *value.clone() {
+                    C::Variable(name) => {
+                        vec![name]
+                    }
+                    _ => vec![],
+                },
+                C::Call(_, arg) => vec![arg.clone()],
+                C::Return(value) => vec![],
+                C::Variable(name) => vec![name.clone()],
+            }
+        }
+        // identify all functions
         fn go(c: C) -> C {
             match c {
                 C::Function(name, arg, body) => {
-                    /* */
-                    let body = match *body {
-                        C::Block(body) => body,
-                        _ => panic!("expected block"),
-                    };
+                    let mut free = identify_free_under(&body);
+                    let mut arg_with_free = arg.clone();
 
-                    println!("function: {}", name);
-
-                    println!("body: {:?}", body);
-                    println!("body: {:?}", body.len());
-
-                    let body = if body.len() == 1 {
-                        body[0].clone()
-                    } else {
-                        Box::new(C::Block(body))
-                    };
-
-                    C::Function(name, arg, body)
-                }
-                C::Block(body) => {
-                    let mut new_body = Vec::new();
-
-                    for c in body {
-                        new_body.push(Box::new(go(*c)));
+                    for f in free.clone() {
+                        if !arg_with_free.contains(&f) {
+                            arg_with_free.push(f);
+                        }
                     }
 
-                    C::Block(new_body)
+                    C::Function(name, arg_with_free, Box::new(go(*body)))
                 }
+                C::Block(body) => C::Block(body.into_iter().map(|c| Box::new(go(*c))).collect()),
                 c => c,
             }
         }
@@ -261,14 +265,9 @@ impl C {
 
             match c {
                 C::Function(name, arg, body) => {
-                    s.push_str(&format!("fn {}({})\n", name, arg));
-
-                    s.push_str(&go(body, indent + 1));
-                    s.push_str("\n");
-
-                    for _ in 0..indent {
-                        s.push_str("    ");
-                    }
+                    let args = arg.join(", ");
+                    s.push_str(&format!("fn {}({}) ", name, args));
+                    s.push_str(&go(body, indent));
                 }
                 C::Block(body) => {
                     s.push_str("{\n");
