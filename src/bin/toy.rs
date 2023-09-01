@@ -39,7 +39,7 @@ unsafe fn run_code<I, O>(jit: &mut jit::JIT, code: &str, input: I) -> Result<O, 
 // assignments, so the input is not in SSA form, but that's ok because
 // Cranelift handles all the details of translating into SSA form itself.
 // const FOO_CODE: &str = r#"(#f. #x. f x) #a. #b. a"#;
-const FOO_CODE: &str = r#"(#x. #y. x) a"#;
+const FOO_CODE: &str = r#"(#a. #b. #c. a b c) a a a"#;
 
 /*
 S(K K)(S K K)

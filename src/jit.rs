@@ -53,12 +53,12 @@ impl JIT {
         // First, parse the string, producing AST nodes.
         let expr = parser::expression(input)
             .map_err(|e| e.to_string())?
-            .make_unique_names();
+            .make_unique_names()
+            .convert_closures();
         //.make_unique_names();
 
         println!("{}", expr);
-
-        println!("{}", C::from(expr).convert_closures().to_string());
+        println!("{}", HoistedExpr::from(expr));
 
         /*
         for function in expr {

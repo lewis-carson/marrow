@@ -6,79 +6,25 @@ use either::Either;
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Expr {
     Variable(String),
-    Abstraction(Vec<Box<Expr>>, Box<Expr>),
-    Application(Box<Expr>, Box<Expr>),
+    Abstraction(Vec<String>, Box<Expr>),
+    Application(Box<Expr>, Vec<Box<Expr>>),
 }
 
 impl Display for Expr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Expr::Variable(n) => write!(f, "{}", n),
-            Expr::Abstraction(x, s) => write!(f, "(λ{}. {})", x[0], s),
-            Expr::Application(a, b) => write!(f, "({} {})", a, b),
-        }
-    }
-}
+            Expr::Abstraction(x, s) => write!(f, "(λ{}. {})", x.join(", "), s),
+            Expr::Application(a, b) => {
+                let joined_b = b
+                    .iter()
+                    .map(|x| x.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
 
-#[derive(Debug)]
-pub struct Function {
-    name: String,
-    args: Vec<String>,
-    body: Either<String, Call>,
-}
-
-impl Display for Function {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        /*
-        fn name(...args){
-            body
-        }
-         */
-
-        write!(f, "fn {}(", self.name)?;
-
-        for (i, arg) in self.args.iter().enumerate() {
-            if i != 0 {
-                write!(f, ", ")?;
+                write!(f, "({} ({}))", a, joined_b)
             }
-
-            write!(f, "{}", arg)?;
         }
-
-        write!(f, ") {{\n    ")?;
-
-        match &self.body {
-            Either::Left(e) => write!(f, "{}", e)?,
-            Either::Right(c) => write!(f, "{}", c)?,
-        }
-
-        write!(f, "\n}}")
-    }
-}
-
-#[derive(Debug)]
-pub struct Call {
-    name: String,
-    args: Vec<String>,
-}
-
-impl Display for Call {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        /*
-        name(...args)
-         */
-
-        write!(f, "{}(", self.name)?;
-
-        for (i, arg) in self.args.iter().enumerate() {
-            if i != 0 {
-                write!(f, ", ")?;
-            }
-
-            write!(f, "{}", arg)?;
-        }
-
-        write!(f, ")")
     }
 }
 
@@ -94,26 +40,21 @@ impl Expr {
                 Expr::Variable(x) => Expr::Variable(env.get(x).unwrap_or(x).clone()),
 
                 Expr::Abstraction(x, s) => {
-                    let name = match x[0].as_ref() {
-                        Expr::Variable(x) => x,
-                        _ => panic!("expected variable"),
-                    };
+                    let arg = x[0].clone();
 
                     let x_prime = {
                         *c += 1;
-                        format!("{}{}", x[0], c)
+                        format!("{}{}", arg, c)
                     };
 
-                    env.insert(name.clone(), x_prime.clone());
+                    env.insert(arg, x_prime.clone());
 
-                    Expr::Abstraction(
-                        vec![Box::new(Expr::Variable(x_prime))],
-                        Box::new(go(env, s, c)),
-                    )
+                    Expr::Abstraction(vec![x_prime], Box::new(go(env, s, c)))
                 }
-                Expr::Application(a, b) => {
-                    Expr::Application(Box::new(go(env, a, c)), Box::new(go(env, b, c)))
-                }
+                Expr::Application(a, b) => Expr::Application(
+                    Box::new(go(env, a, c)),
+                    vec![Box::new(go(env, &mut b[0], c))],
+                ),
             };
 
             transformed_expr
@@ -121,186 +62,205 @@ impl Expr {
 
         go(&mut sm, self, &mut c)
     }
-}
-
-#[derive(Debug, Clone)]
-pub enum C {
-    Function(String, Vec<String>, Box<C>),
-    Block(Vec<Box<C>>),
-    Let(String, Box<C>),
-    Call(String, String),
-    Return(Box<C>),
-    Variable(String),
-}
-
-impl C {
-    pub fn from(expr: Expr) -> Self {
-        fn go(e: Expr, c: &mut usize) -> C {
-            match e {
-                Expr::Variable(x) => {
-                    /*
-                    return x
-                     */
-                    *c += 1;
-                    C::Let(format!("f{}", *c), Box::new(C::Variable(x)))
-                }
-                Expr::Application(a, b) => {
-                    /*
-                    let r = f(a)
-                    return r
-
-                     */
-
-                    let left = go(*a, c);
-                    let right = go(*b, c);
-
-                    let left_name = match left.clone() {
-                        C::Function(name, _, _) => name,
-                        C::Variable(name) => name,
-                        C::Let(name, _) => name,
-                        C::Return(a) => match *a {
-                            C::Function(name, _, _) => name,
-                            _ => panic!("expected function inside return"),
-                        },
-                        x => panic!("expected let, got {:?}", x),
-                    };
-
-                    let right_name = match right.clone() {
-                        C::Function(name, _, _) => name,
-                        C::Variable(name) => name,
-                        C::Let(name, _) => name,
-                        C::Return(a) => match *a {
-                            C::Function(name, _, _) => name,
-                            _ => panic!("expected function inside return"),
-                        },
-                        x => panic!("expected let, got {:?}", x),
-                    };
-
-                    C::Block(vec![
-                        Box::new(left),
-                        Box::new(right),
-                        Box::new(C::Let(
-                            "r".to_owned(),
-                            Box::new(C::Call(left_name, right_name)),
-                        )),
-                        Box::new(C::Return(Box::new(C::Variable("r".to_owned())))),
-                    ])
-                }
-                Expr::Abstraction(x, s) => {
-                    /*
-                    fn f(x) {
-                        go(s)
-                    }
-                     */
-
-                    let name = match x[0].as_ref() {
-                        Expr::Variable(x) => x,
-                        _ => panic!("expected variable"),
-                    };
-
-                    *c += 1;
-
-                    C::Function(format!("f{c}"), vec![name.clone()], Box::new(go(*s, c)))
-                }
-            }
-        }
-
-        C::Function("main".to_owned(), vec![], Box::new(go(expr, &mut 0)))
-    }
 
     pub fn convert_closures(&self) -> Self {
-        fn identify_free_under(c: &C) -> Vec<String> {
-            match c {
-                C::Function(_, _, body) => identify_free_under(body),
-                C::Block(body) => {
-                    let mut free = vec![];
+        fn free_variables(e: &Expr, bound: Vec<String>) -> Vec<String> {
+            match e {
+                Expr::Variable(x) => {
+                    let mut fv = vec![];
+                    fv.extend(bound.clone());
 
-                    for c in body {
-                        free.append(&mut identify_free_under(c));
+                    if !bound.contains(x) {
+                        fv.push(x.clone());
                     }
 
-                    free
+                    fv
                 }
-                C::Let(_, value) => match *value.clone() {
-                    C::Variable(name) => {
-                        vec![name]
-                    }
-                    _ => vec![],
-                },
-                C::Call(_, arg) => vec![arg.clone()],
-                C::Return(value) => vec![],
-                C::Variable(name) => vec![name.clone()],
+                Expr::Abstraction(x, s) => {
+                    let mut bound = bound.clone();
+                    bound.extend(x.clone());
+
+                    free_variables(s, bound)
+                }
+                Expr::Application(a, b) => {
+                    let mut fv = free_variables(a, bound.clone());
+                    fv.extend(free_variables(&b[0], bound));
+
+                    fv
+                }
             }
         }
-        // identify all functions
-        fn go(c: C) -> C {
-            match c {
-                C::Function(name, arg, body) => {
-                    let mut free = identify_free_under(&body);
-                    let mut arg_with_free = arg.clone();
 
-                    for f in free.clone() {
-                        if !arg_with_free.contains(&f) {
-                            arg_with_free.push(f);
+        fn go(e: Expr) -> Expr {
+            match e {
+                Expr::Variable(x) => Expr::Variable(x.to_string()),
+                Expr::Abstraction(x, s) => {
+                    let mut x_prime = free_variables(&s, x.clone());
+
+                    x_prime.sort();
+                    x_prime.dedup();
+
+                    Expr::Abstraction(x_prime, Box::new(go(*s)))
+                }
+                Expr::Application(a, b) => {
+                    Expr::Application(Box::new(go(*a)), vec![Box::new(go(*b[0].clone()))])
+                }
+            }
+        }
+
+        fn collapse(e: Expr) -> Expr {
+            // (λf1, x2. (λf1, x2. (f1 x2))) -> (λf1, x2. (f1 x2))
+            match e {
+                Expr::Variable(x) => Expr::Variable(x),
+                Expr::Abstraction(a, b) => match *b.clone() {
+                    Expr::Abstraction(c, d) => {
+                        if c == a {
+                            Expr::Abstraction(c, Box::new(collapse(*d)))
+                        } else {
+                            Expr::Abstraction(a, Box::new(collapse(*b)))
                         }
                     }
+                    _ => Expr::Abstraction(a, Box::new(collapse(*b))),
+                },
+                Expr::Application(a, b) => {
+                    match *a.clone() {
+                        Expr::Application(c, d) => {
+                            // inline d, then b
+                            let inline = vec![
+                                Box::new(collapse(*d[0].clone())),
+                                Box::new(collapse(*b[0].clone())),
+                            ];
 
-                    C::Function(name, arg_with_free, Box::new(go(*body)))
+                            Expr::Application(Box::new(collapse(*c)), inline)
+                        }
+                        _ => Expr::Application(
+                            Box::new(collapse(*a)),
+                            vec![Box::new(collapse(*b[0].clone()))],
+                        ),
+                    }
                 }
-                C::Block(body) => C::Block(body.into_iter().map(|c| Box::new(go(*c))).collect()),
-                c => c,
             }
         }
 
         go(self.clone())
     }
+}
 
-    pub fn to_string(&self) -> String {
-        fn go(c: &C, indent: usize) -> String {
-            let mut s = String::new();
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct HoistedExpr(HashMap<String, Expr>);
 
-            for _ in 0..indent {
-                s.push_str("    ");
-            }
+/*
+to hoist,
 
-            match c {
-                C::Function(name, arg, body) => {
-                    let args = arg.join(", ");
-                    s.push_str(&format!("fn {}({}) ", name, args));
-                    s.push_str(&go(body, indent));
+C = (x)
+D = (x)
+B = (λx. D)
+A = (B C)
+MAIN = (λx. A)
+
+(λx (λx. x) (x))
+
+*/
+
+impl HoistedExpr {
+    pub fn from(expr: Expr) -> HoistedExpr {
+        let mut lets = HashMap::new();
+
+        fn redirect_application(
+            map: &mut HashMap<String, Expr>,
+            f: String,
+            a: String,
+            b: Vec<String>,
+        ) {
+            match map.get(&f).unwrap() {
+                Expr::Variable(_) => panic!(""),
+                Expr::Application(_, _) => {
+                    map.get_mut(&f).map(|s| {
+                        *s = Expr::Application(
+                            Box::new(Expr::Variable(a)),
+                            b.iter()
+                                .map(|x| Box::new(Expr::Variable(x.clone())))
+                                .collect(),
+                        )
+                    });
                 }
-                C::Block(body) => {
-                    s.push_str("{\n");
-
-                    for c in body {
-                        s.push_str(&go(c, indent + 1));
-                        s.push_str("\n");
-                    }
-
-                    for _ in 0..indent {
-                        s.push_str("    ");
-                    }
-
-                    s.push_str("}");
-                }
-                C::Let(name, value) => {
-                    s.push_str(&format!("let {} = {};", name, go(value, 0)));
-                }
-                C::Call(name, arg) => {
-                    s.push_str(&format!("{}({})", name, arg));
-                }
-                C::Return(name) => {
-                    s.push_str(&format!("return {};", go(name, 0)));
-                }
-                C::Variable(name) => {
-                    s.push_str(name);
-                }
-            }
-
-            s
+                Expr::Abstraction(_, _) => panic!(""),
+            };
         }
 
-        go(self, 0)
+        fn redirect_abstraction(map: &mut HashMap<String, Expr>, f: String, s: String) {
+            match map.get(&f).unwrap() {
+                Expr::Variable(_) => panic!(""),
+                Expr::Application(_, _) => panic!(""),
+                Expr::Abstraction(x, _) => {
+                    let z = x.clone();
+                    map.get_mut(&f)
+                        .map(|m| *m = Expr::Abstraction(z, Box::new(Expr::Variable(s))));
+                }
+            };
+        }
+
+        fn go(expr_name: String, expr: Expr, lets: &mut HashMap<String, Expr>, c: &mut usize) {
+            match expr {
+                Expr::Variable(x) => {}
+                Expr::Abstraction(x, s) => {
+                    *c += 1;
+
+                    let s_name = format!("F{}", *c);
+
+                    lets.insert(s_name.clone(), *s.clone());
+
+                    // rename with redirect
+                    redirect_abstraction(lets, expr_name, s_name.clone());
+
+                    go(s_name, *s, lets, c);
+                }
+                Expr::Application(a, b) => {
+                    *c += 1;
+
+                    let a_name = format!("F{}", *c);
+
+                    let mut redirects = vec![];
+
+                    for stmt in b {
+                        *c += 1;
+                        let stmt_name = format!("F{}", *c);
+                        lets.insert(stmt_name.clone(), *stmt.clone());
+                        go(stmt_name.clone(), *stmt, lets, c);
+                        redirects.push(stmt_name);
+                    }
+
+                    lets.insert(a_name.clone(), *a.clone());
+
+                    // rename with redirect
+                    redirect_application(lets, expr_name, a_name.clone(), redirects);
+
+                    go(a_name, *a, lets, c);
+                }
+            }
+        }
+
+        lets.insert("F0".to_string(), expr.clone());
+        go("F0".to_string(), expr, &mut lets, &mut 0);
+
+        HoistedExpr(lets)
+    }
+}
+
+impl Display for HoistedExpr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut s = String::new();
+
+        // turn map into list of (String, Expr) and sort by String
+        let mut lets: Vec<(&String, &Expr)> = self.0.iter().collect();
+
+        lets.sort_by(|a, b| b.0.cmp(a.0));
+
+        for (name, expr) in lets {
+            s.push_str(&format!("let {} = {};\n", name, expr));
+        }
+
+        write!(f, "{}", s)
     }
 }
 
@@ -310,17 +270,17 @@ peg::parser!(pub grammar parser() for str {
             e:variable() { e }
             --
             "#" _ x:variable() _ "." _ s:@ {
-                Expr::Abstraction(vec![Box::new(x)], Box::new(s))
+                Expr::Abstraction(vec![x.to_string()], Box::new(s))
             }
             --
             a:(@) _ b:@ {
-                Expr::Application(Box::new(a), Box::new(b))
+                Expr::Application(Box::new(a), vec![Box::new(b)])
             }
             --
             "(" _ e:expression() _ ")" { e }
             --
             "(" _ "#" _ x:variable() _ "." _ s:expression() _ ")" {
-                Expr::Abstraction(vec![Box::new(x)], Box::new(s))
+                Expr::Abstraction(vec![x.to_string()], Box::new(s))
             }
         }
 
